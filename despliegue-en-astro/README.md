@@ -59,4 +59,19 @@ Notas y recomendaciones
 - Para clústeres con muchos nodos, considere crear nombres únicos o prefijarlos con un identificador de clúster.
 - Añada validaciones en Astro para comprobar que el backend devuelve `success: true` antes de mostrar credenciales al usuario.
 
+
+Dropdown UI (Astro) — quick integration
+
+To let users select instance types with a dropdown, the frontend must:
+- Fetch instance types from the backend (`/instance-types/gcp` or `/instance-types/aws`).
+- Populate a `<select>` element with the results.
+- Allow the user to set `count`, `image_family` (or `image`) and submit to `/create` or `/aws/create`.
+
+We provide a minimal React component example in `integración con astro/astro_examples.md` named `NodeCreator` that you can drop into an Astro project. Use `client:load` to render the component as an island in Astro.
+
+Server notes:
+- Backend endpoints `/instance-types/gcp` and `/instance-types/aws` already exist and accept query params for filtering (cpus/ram).
+- The `/create` endpoint accepts `count`, `image_project`, `image_family`, `image` and `machine_type`.
+
+Security note: Generated passwords are returned in responses. For production, use a secrets manager or ephemeral delivery channel.
 Si quieres, puedo añadir ejemplos de código más completos para usar desde un `server` de Astro (TypeScript) y un componente UI que muestre tipos y permita crear clústeres interactivos.

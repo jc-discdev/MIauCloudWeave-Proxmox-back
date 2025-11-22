@@ -132,3 +132,98 @@ const createRes = await fetch('http://127.0.0.1:8001/create', {
 const createData = await createRes.json();
 console.log(createData);
 ```
+
+
+---
+
+Dropdown UI example (Astro)
+
+Below is a minimal React component you can include in an Astro project to let users select instance types from a dropdown (fetched from the backend), choose a node count and image, then create the nodes.
+
+1) Install React support in your Astro project (if not already):
+
+```bash
+npm install react react-dom
+npm install --save-dev @types/react
+```
+
+2) Example React component (client-side) — save as `src/components/NodeCreator.tsx` in your Astro site:
+
+```tsx
+import React, {useEffect, useState} from 'react';
+
+type GcpType = { name: string; cpus: number; ram_gb: number; description?: string };
+
+export default function NodeCreator(){
+  const [zone, setZone] = useState('europe-west1-b');
+  const [cpus, setCpus] = useState(2);
+  const [ram, setRam] = useState(4);
+  const [types, setTypes] = useState<GcpType[]>([]);
+  const [selected, setSelected] = useState('');
+  const [count, setCount] = useState(1);
+  const [imageProject, setImageProject] = useState('ubuntu-os-cloud');
+  const [imageFamily, setImageFamily] = useState('ubuntu-2204-lts');
+  const [result, setResult] = useState<any>(null);
+
+  useEffect(()=>{
+    async function load(){
+      const res = await fetch(`/instance-types/gcp?zone=${zone}&cpus=${cpus}&ram_gb=${ram}`);
+      const j = await res.json();
+      setTypes(j.instance_types || []);
+      if(j.instance_types && j.instance_types.length) setSelected(j.instance_types[0].name);
+    }
+    load();
+  }, [zone, cpus, ram]);
+
+  async function createNodes(){
+    const payload = {
+      credentials: './credentials.json',
+      zone,
+      name: 't3-astrocluster',
+      machine_type: selected,
+      count,
+      image_project: imageProject,
+      image_family: imageFamily
+    };
+    const res = await fetch('/create',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    const j = await res.json();
+    setResult(j);
+  }
+
+  return (
+    <div>
+      <h3>Create GCP Nodes</h3>
+      <label>Zone: <input value={zone} onChange={e=>setZone(e.target.value)}/></label>
+      <label>CPUs: <input type="number" value={cpus} onChange={e=>setCpus(Number(e.target.value))}/></label>
+      <label>RAM(GB): <input type="number" value={ram} onChange={e=>setRam(Number(e.target.value))}/></label>
+      <div>
+        <label>Instance type:</label>
+        <select value={selected} onChange={e=>setSelected(e.target.value)}>
+          {types.map(t=> (<option key={t.name} value={t.name}>{t.name} — {t.cpus} vCPU / {t.ram_gb}GB</option>))}
+        </select>
+      </div>
+      <label>Count: <input type="number" min={1} value={count} onChange={e=>setCount(Number(e.target.value))}/></label>
+      <label>Image project: <input value={imageProject} onChange={e=>setImageProject(e.target.value)}/></label>
+      <label>Image family: <input value={imageFamily} onChange={e=>setImageFamily(e.target.value)}/></label>
+      <button onClick={createNodes}>Create</button>
+      <pre>{JSON.stringify(result, null, 2)}</pre>
+    </div>
+  )
+}
+```
+
+3) Use this component in an Astro page and enable client-side rendering (island):
+
+```astro
+---
+import NodeCreator from '../components/NodeCreator';
+---
+
+<NodeCreator client:load />
+```
+
+This will render a dropdown with instance types fetched from the backend and let the user create nodes by pressing `Create`. The response includes generated passwords per node.
+
+---
+
+If you want, puedo añadir un ejemplo `src/pages/deploy.astro` completo y actualizar la guía con instrucciones puntuales para Astro + Vercel/Netlify.

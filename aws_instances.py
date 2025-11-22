@@ -7,23 +7,12 @@ import uuid
 import secrets
 import string
 from typing import Optional
-
-
 def _get_ec2_client(region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
-    # Default region for AWS operations
     if not region_name:
         region_name = 'us-west-2'
-    # Use a short timeout and limited retries to avoid long hangs when AWS endpoints
-    # are unreachable or metadata service is slow. If explicit keys are not provided
-    # disable EC2 metadata lookups to prevent the client from blocking while trying
-    # to fetch IAM role credentials from the instance metadata service.
     client_config = Config(connect_timeout=3, read_timeout=5, retries={'max_attempts': 2})
-
     if not aws_access_key or not aws_secret_key:
-        # Prevent botocore from calling the IMDS (instance metadata) which can
-        # cause long blocking delays when running outside EC2 without network.
         os.environ.setdefault('AWS_EC2_METADATA_DISABLED', 'true')
-
     if aws_access_key and aws_secret_key:
         return boto3.client(
             'ec2',
@@ -35,13 +24,7 @@ def _get_ec2_client(region_name=None, aws_access_key=None, aws_secret_key=None, 
         )
     else:
         return boto3.client('ec2', region_name=region_name, config=client_config)
-
-
 def list_instances_aws(region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None, state: str | None = None):
-    """Lista instancias EC2 en la región indicada (o por defecto).
-
-    Devuelve únicamente instancias cuyo tag `Name` comienza con `t3-`.
-    """
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     try:
         resp = client.describe_instances()
@@ -54,13 +37,15 @@ def list_instances_aws(region_name=None, aws_access_key=None, aws_secret_key=Non
                     if t.get('Key') == 'Name':
                         name_tag = t.get('Value')
                         break
-                # Only include instances whose Name tag starts with the t3- prefix
                 if not name_tag or not name_tag.startswith('t3-'):
                     continue
-                # If a state filter was provided, check instance state
                 inst_state = inst.get('State', {}).get('Name')
-                if state and (not inst_state or inst_state.upper() != state.upper()):
-                    continue
+                if state:
+                    if not inst_state or inst_state.upper() != state.upper():
+                        continue
+                else:
+                    if inst_state in ['terminated', 'shutting-down']:
+                        continue
                 instances.append({
                     'InstanceId': inst.get('InstanceId'),
                     'Name': name_tag,
@@ -72,22 +57,9 @@ def list_instances_aws(region_name=None, aws_access_key=None, aws_secret_key=Non
                     'Tags': tags
                 })
         return instances
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found. Set aws_access_key_id/aws_secret_access_key or configure an IAM role.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint: {e}")
-    except ClientError as e:
-        # Provide the AWS error code/message
-        raise RuntimeError(f"AWS ClientError: {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while listing EC2 instances: {e}")
-
-
+    except Exception as e:
+        raise RuntimeError(f"Error listing AWS instances: {e}")
 def list_instances_aws_all(region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
-    """Lista todas las instancias EC2 en la región indicada (sin filtrar por Name tag).
-
-    Esta función es útil para depuración. No debe exponerse en producción sin control.
-    """
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     try:
         resp = client.describe_instances()
@@ -104,30 +76,16 @@ def list_instances_aws_all(region_name=None, aws_access_key=None, aws_secret_key
                     'Tags': inst.get('Tags', [])
                 })
         return instances
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found. Set aws_access_key_id/aws_secret_access_key or configure an IAM role.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint: {e}")
-    except ClientError as e:
-        raise RuntimeError(f"AWS ClientError: {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while listing EC2 instances: {e}")
-
-
+    except Exception as e:
+        raise RuntimeError(f"Error listing all AWS instances: {e}")
 def find_instances_aws(name: Optional[str] = None, region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
-    """Busca instancias por tag Name (solo devuelve las que empiecen por t3-).
-
-    Si `name` se proporciona, busca instancias cuyo Name empieza con `t3-<name>` o `t3-` si `name` ya incluye el prefijo.
-    """
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     try:
         if name:
             search_name = name if name.startswith('t3-') else f't3-{name}'
             resp = client.describe_instances(Filters=[{'Name': 'tag:Name', 'Values': [f'{search_name}*']}])
         else:
-            # if no name provided, return same as list_instances_aws
             return list_instances_aws(region_name=region_name, aws_access_key=aws_access_key, aws_secret_key=aws_secret_key, aws_session_token=aws_session_token)
-
         instances = []
         for reservation in resp.get('Reservations', []):
             for inst in reservation.get('Instances', []):
@@ -150,38 +108,20 @@ def find_instances_aws(name: Optional[str] = None, region_name=None, aws_access_
                     'Tags': tags
                 })
         return instances
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found for find operation.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint for find: {e}")
-    except ClientError as e:
-        raise RuntimeError(f"AWS ClientError (find): {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while finding EC2 instances: {e}")
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found. Set aws_access_key_id/aws_secret_access_key or configure an IAM role.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint: {e}")
-    except ClientError as e:
-        # Provide the AWS error code/message
-        raise RuntimeError(f"AWS ClientError: {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while listing EC2 instances: {e}")
-
-
+    except Exception as e:
+        raise RuntimeError(f"Error finding AWS instances: {e}")
 def find_instance_types_aws(region_name=None, min_vcpus=1, min_memory_gb=1, aws_access_key=None, aws_secret_key=None, aws_session_token=None, max_results=500):
-    """Busca tipos de instancia EC2 que cumplan mínimos de vCPU y memoria (GB).
-
-    Nota: DescribeInstanceTypes puede devolver muchos tipos; limitamos por `max_results`.
-    """
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     try:
         paginator = client.get_paginator('describe_instance_types')
         matches = []
         fetched = 0
+        tolerance = 0.5
+        target_vcpus = min_vcpus
+        target_memory_gb = min_memory_gb
+        
         for page in paginator.paginate():
             for it in page.get('InstanceTypes', []):
-                # vCPU
                 vcpus = None
                 mem_gb = None
                 vcpu_info = it.get('VCpuInfo')
@@ -189,41 +129,30 @@ def find_instance_types_aws(region_name=None, min_vcpus=1, min_memory_gb=1, aws_
                 if vcpu_info:
                     vcpus = vcpu_info.get('DefaultVCpus')
                 if mem_info:
-                    # MemoryInfo returns MiB
                     mem_mib = mem_info.get('SizeInMiB')
                     if mem_mib is not None:
                         mem_gb = round(mem_mib / 1024, 2)
-
                 if vcpus is None or mem_gb is None:
                     continue
-
-                if vcpus >= min_vcpus and mem_gb >= min_memory_gb:
-                    matches.append({
-                        'instance_type': it.get('InstanceType'),
-                        'vcpus': vcpus,
-                        'memory_gb': mem_gb,
-                        'supported_virtuallization_types': it.get('SupportedVirtualizationTypes')
-                    })
-                    fetched += 1
-                    if fetched >= max_results:
-                        return matches
-
+                if not (target_vcpus - tolerance <= vcpus <= target_vcpus + tolerance):
+                    continue
+                if not (target_memory_gb - tolerance <= mem_gb <= target_memory_gb + tolerance):
+                    continue
+                matches.append({
+                    'instance_type': it.get('InstanceType'),
+                    'vcpus': vcpus,
+                    'memory_gb': mem_gb,
+                    'supported_virtuallization_types': it.get('SupportedVirtualizationTypes')
+                })
+                fetched += 1
+                if fetched >= max_results:
+                    matches.sort(key=lambda x: (x['vcpus'], x['memory_gb']))
+                    return matches
+        matches.sort(key=lambda x: (x['vcpus'], x['memory_gb']))
         return matches
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found for instance-type lookup.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint for instance types: {e}")
-    except ClientError as e:
-        raise RuntimeError(f"AWS ClientError (instance types): {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while finding instance types: {e}")
-
-
-def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_type='t3.micro', name=None, password: Optional[str]=None, key_name=None, security_group_ids=None, subnet_id=None, min_count=1, max_count=1, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
-    """Crea una instancia EC2 simple y devuelve la lista de InstanceIds creadas.
-
-    Si `name` se proporciona, añade tag `Name` con prefijo `t3-`.
-    """
+    except Exception as e:
+        raise RuntimeError(f"Error finding AWS instance types: {e}")
+def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_type='t3.micro', name=None, password: Optional[str]=None, key_name=None, security_group_ids=None, subnet_id=None, min_count=1, max_count=1, aws_access_key=None, aws_secret_key=None, aws_session_token=None, user_data_script: Optional[str] = None):
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     params = {
         'ImageId': image_id,
@@ -235,14 +164,11 @@ def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_
         params['SecurityGroupIds'] = security_group_ids
     if subnet_id:
         params['SubnetId'] = subnet_id
-    # Ensure Name tag with t3- prefix. If no name passed, generate one.
     if not name:
-        # deterministic-ish name: t3-<uuid4 short>
         name = f"t3-{uuid.uuid4().hex[:8]}"
     else:
         if not name.startswith('t3-'):
             name = f't3-{name}'
-
     params['TagSpecifications'] = [
         {
             'ResourceType': 'instance',
@@ -251,7 +177,6 @@ def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_
             ]
         }
     ]
-    # We'll create instances one-by-one when we need per-instance unique passwords.
     def _gen_password(length: int = 14) -> str:
         alphabet = string.ascii_letters + string.digits + "!@#$%&*()-_=+"
         while True:
@@ -259,17 +184,14 @@ def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_
             if (any(c.islower() for c in pw) and any(c.isupper() for c in pw)
                     and any(c.isdigit() for c in pw) and any(c in "!@#$%&*()-_=+" for c in pw)):
                 return pw
-
     try:
-        # Decide how many instances to create. Prefer max_count if >1, otherwise use min_count.
         count = max_count if (max_count and max_count > 1) else (min_count or 1)
         created = []
-
         for i in range(count):
-            # generate a unique password per instance
             instance_pw = _gen_password()
             safe_pw = instance_pw.replace('"', '\\"')
-            user_data = f"""#cloud-config
+            
+            base_user_data = f"""#cloud-config
 chpasswd:
   list: |
     ubuntu:{safe_pw}
@@ -279,26 +201,24 @@ runcmd:
   - [ bash, -lc, "id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu" ]
   - [ bash, -lc, "echo 'ubuntu:{safe_pw}' | chpasswd" ]
 """
-
+            full_user_data = base_user_data
+            if user_data_script:
+                script_lines = user_data_script.replace('"', '\\"').split('\n')
+                for line in script_lines:
+                    if line.strip():
+                         full_user_data += f"  - [ bash, -c, \"{line}\" ]\n"
             params_iter = params.copy()
-            params_iter['UserData'] = user_data
-            # Ensure TagSpecifications uses Name; if multiple instances are created with same Name,
-            # the tag will be the same for all (that's acceptable) — if you want unique names,
-            # the caller can pass different names.
-
+            params_iter['UserData'] = full_user_data
             resp = client.run_instances(**params_iter, MinCount=1, MaxCount=1)
             ids = [i.get('InstanceId') for i in resp.get('Instances', [])]
             if not ids:
                 continue
-
             inst_id = ids[0]
-            # Wait for this instance to be running
             waiter = client.get_waiter('instance_running')
             try:
                 waiter.wait(InstanceIds=[inst_id], WaiterConfig={'Delay': 3, 'MaxAttempts': 20})
             except Exception:
                 pass
-
             desc = client.describe_instances(InstanceIds=[inst_id])
             for reservation in desc.get('Reservations', []):
                 for inst in reservation.get('Instances', []):
@@ -316,29 +236,16 @@ runcmd:
                         'Password': instance_pw,
                         'username': 'ubuntu'
                     })
-
         return created
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found. Cannot create instance.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint to create instance: {e}")
-    except ClientError as e:
-        raise RuntimeError(f"AWS ClientError creating instance: {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while creating EC2 instance: {e}")
-
-
+    except Exception as e:
+        raise RuntimeError(f"Error creating AWS instance: {e}")
 def delete_instance_aws(instance_id=None, name=None, region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
-    """Termina una instancia EC2 por `instance_id` o por tag Name si se pasa `name`."""
     client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
     warning_msg = None
     try:
         target_ids = None
-
         if not instance_id and name:
-            # Ensure we only search for t3- prefixed names
             search_name = name if name.startswith('t3-') else f't3-{name}'
-            # Buscar por tag Name (exact match)
             resp = client.describe_instances(Filters=[{'Name': 'tag:Name', 'Values': [search_name]}])
             instances = []
             for r in resp.get('Reservations', []):
@@ -346,12 +253,9 @@ def delete_instance_aws(instance_id=None, name=None, region_name=None, aws_acces
                     instances.append(inst.get('InstanceId'))
             if not instances:
                 return {'terminated': [], 'message': f'No instance with Name={search_name} found'}
-            # Terminate all matching instances rather than only the first
             target_ids = instances
-
         elif instance_id:
             target_ids = [instance_id]
-            # If instance_id provided directly, check Name tag for a warning (do not refuse)
             try:
                 check = client.describe_instances(InstanceIds=[instance_id])
                 found_name = None
@@ -364,23 +268,28 @@ def delete_instance_aws(instance_id=None, name=None, region_name=None, aws_acces
                 if found_name and not found_name.startswith('t3-'):
                     warning_msg = f"Warning: instance {instance_id} has Name='{found_name}' which does not start with 't3-'. Proceeding with termination as requested."
             except ClientError:
-                # proceed to attempt termination (error will be handled below)
                 pass
-
         if not target_ids:
             raise ValueError('instance_id or name must be provided')
-
         resp = client.terminate_instances(InstanceIds=target_ids)
         terminated = [t.get('InstanceId') for t in resp.get('TerminatingInstances', [])]
         result = {'terminated': terminated}
         if warning_msg:
             result['warning'] = warning_msg
         return result
-    except NoCredentialsError:
-        raise RuntimeError("No AWS credentials found. Cannot delete instance.")
-    except EndpointConnectionError as e:
-        raise RuntimeError(f"Unable to connect to AWS endpoint to delete instance: {e}")
-    except ClientError as e:
-        raise RuntimeError(f"AWS ClientError deleting instance: {e.response.get('Error', {})}")
-    except BotoCoreError as e:
-        raise RuntimeError(f"BotoCoreError while deleting EC2 instance: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Error deleting AWS instance: {e}")
+def start_instance_aws(instance_id, region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
+    client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
+    try:
+        client.start_instances(InstanceIds=[instance_id])
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Error starting AWS instance: {e}")
+def stop_instance_aws(instance_id, region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None):
+    client = _get_ec2_client(region_name, aws_access_key, aws_secret_key, aws_session_token)
+    try:
+        client.stop_instances(InstanceIds=[instance_id])
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Error stopping AWS instance: {e}")
