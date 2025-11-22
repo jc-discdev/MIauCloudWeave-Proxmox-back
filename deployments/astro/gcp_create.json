@@ -1,14 +1,7 @@
 {
   "credentials": "./credentials.json",
   "zone": "europe-west1-b",
-  "name": "mi-instancia-gcp-1",
+  "name": "t3-mi-instancia-gcp-1",
   "machine_type": "e2-medium",
   "password": "ChangeMeStrongP@ssw0rd"
-}
-{
-  "credentials": "./credentials.json",
-  "zone": "europe-west1-b",
-  "name": "mi-instancia-gcp-1",
-  "machine_type": "e2-medium",
-  "ssh_key": "usuario:ssh-rsa AAAA..."
 }

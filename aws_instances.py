@@ -1,4 +1,6 @@
+import os
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError, EndpointConnectionError
 import time
 import uuid
@@ -9,16 +11,28 @@ def _get_ec2_client(region_name=None, aws_access_key=None, aws_secret_key=None, 
     # Default region for AWS operations
     if not region_name:
         region_name = 'us-west-2'
+    # Use a short timeout and limited retries to avoid long hangs when AWS endpoints
+    # are unreachable or metadata service is slow. If explicit keys are not provided
+    # disable EC2 metadata lookups to prevent the client from blocking while trying
+    # to fetch IAM role credentials from the instance metadata service.
+    client_config = Config(connect_timeout=3, read_timeout=5, retries={'max_attempts': 2})
+
+    if not aws_access_key or not aws_secret_key:
+        # Prevent botocore from calling the IMDS (instance metadata) which can
+        # cause long blocking delays when running outside EC2 without network.
+        os.environ.setdefault('AWS_EC2_METADATA_DISABLED', 'true')
+
     if aws_access_key and aws_secret_key:
         return boto3.client(
             'ec2',
             region_name=region_name,
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
-            aws_session_token=aws_session_token
+            aws_session_token=aws_session_token,
+            config=client_config
         )
     else:
-        return boto3.client('ec2', region_name=region_name)
+        return boto3.client('ec2', region_name=region_name, config=client_config)
 
 
 def list_instances_aws(region_name=None, aws_access_key=None, aws_secret_key=None, aws_session_token=None, state: str | None = None):
@@ -238,33 +252,59 @@ def create_instance_aws(region_name, image_id='ami-03c1f788292172a4e', instance_
         }
     ]
     # If a password is provided, build a cloud-init / userdata script to set it
-    if password:
-        # Escape single quotes for safety
-        safe_password = password.replace("'", "'\"'\"")
-        user_data = f"""#!/bin/bash
-set -e
-# Ensure ubuntu user exists and set password
-if id -u ubuntu >/dev/null 2>&1; then
-  echo "ubuntu:{password}" | chpasswd
-else
-  useradd -m -s /bin/bash ubuntu || true
-  echo "ubuntu:{password}" | chpasswd
-fi
-# Also set ec2-user if present
-if id -u ec2-user >/dev/null 2>&1; then
-  echo "ec2-user:{password}" | chpasswd
-fi
-# Enable password authentication for SSH
-sed -i 's/^#PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
-systemctl restart sshd || service ssh restart || true
+        if password:
+                # Use cloud-init (YAML) user-data to set passwords and enable SSH password authentication.
+                # This is more portable across AMIs that support cloud-init.
+                # The chpasswd block sets passwords for common users; expire: False avoids forcing password change.
+                user_data = f"""#cloud-config
+chpasswd:
+    list: |
+        ec2-user:{password}
+        ubuntu:{password}
+        debian:{password}
+    expire: False
+ssh_pwauth: True
 """
-        params['UserData'] = user_data
+                params['UserData'] = user_data
 
     try:
         resp = client.run_instances(**params)
         ids = [i.get('InstanceId') for i in resp.get('Instances', [])]
-        return ids
+
+        # Wait for instances to reach 'running' state and collect their public IPs
+        created = []
+        if ids:
+            waiter = client.get_waiter('instance_running')
+            try:
+                waiter.wait(InstanceIds=ids, WaiterConfig={'Delay': 3, 'MaxAttempts': 20})
+            except Exception:
+                # If waiter fails or times out, proceed to describe instances anyway
+                pass
+
+            desc = client.describe_instances(InstanceIds=ids)
+            for reservation in desc.get('Reservations', []):
+                for inst in reservation.get('Instances', []):
+                    inst_id = inst.get('InstanceId')
+                    public_ip = inst.get('PublicIpAddress')
+                    # Name tag
+                    name_tag = None
+                    for t in inst.get('Tags', []) or []:
+                        if t.get('Key') == 'Name':
+                            name_tag = t.get('Value')
+                            break
+                    # Determine recommended username based on common AMI types
+                    primary_username = 'ec2-user'
+                    alt_usernames = ['ubuntu', 'debian', 'admin']
+                    created.append({
+                        'InstanceId': inst_id,
+                        'Name': name_tag,
+                        'PublicIpAddress': public_ip,
+                        'Password': password,
+                        'username': primary_username,
+                        'alt_usernames': alt_usernames
+                    })
+
+        return created
     except NoCredentialsError:
         raise RuntimeError("No AWS credentials found. Cannot create instance.")
     except EndpointConnectionError as e:

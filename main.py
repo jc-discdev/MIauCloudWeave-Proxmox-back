@@ -147,7 +147,7 @@ def api_find(req: FindRequest):
 def api_create(req: CreateRequest):
     creds = _set_credentials_and_load(req.credentials)
     try:
-        success = create_instance(
+        result = create_instance(
             project_id=creds['project_id'],
             zone=req.zone,
             instance_name=req.name,
@@ -155,7 +155,8 @@ def api_create(req: CreateRequest):
             ssh_key=req.ssh_key,
             password=req.password
         )
-        return {"success": bool(success)}
+        # result is a dict with keys: success, name, public_ip, password or error
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -282,6 +283,13 @@ def api_aws_list_get(region: Optional[str] = None, credentials_path: Optional[st
     """
     credentials_path = credentials_path or os.path.join(os.path.dirname(__file__), 'credentials_aws.json')
     creds = _load_aws_credentials_file(credentials_path)
+
+    # If no credentials were found in file and none provided inline, fail fast.
+    if not (creds.get('aws_access_key_id') or creds.get('aws_access_key') or creds.get('aws_secret_access_key') or creds.get('aws_secret_key')):
+        raise HTTPException(status_code=400, detail=(
+            "No AWS credentials found. Please provide a valid 'credentials_aws.json' in the repo root "
+            "or pass 'aws_access_key' and 'aws_secret_key' in the request."
+        ))
     try:
         instances = list_instances_aws(region_name=region or DEFAULT_REGION,
                                        aws_access_key=creds.get('aws_access_key_id'),
@@ -369,7 +377,7 @@ def api_aws_create(req: AwsCreateRequest):
         else:
             aws_creds = _load_aws_credentials_file()
 
-        ids = create_instance_aws(
+        created = create_instance_aws(
             region_name=req.region or aws_creds.get('region') or 'us-west-2',
             image_id=req.image_id,
             instance_type=req.instance_type,
@@ -384,7 +392,7 @@ def api_aws_create(req: AwsCreateRequest):
             aws_secret_key=aws_creds.get('aws_secret_access_key') or aws_creds.get('aws_secret_key'),
             aws_session_token=aws_creds.get('aws_session_token')
         )
-        return {"success": True, "instance_ids": ids}
+        return {"success": True, "created": created}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -469,14 +477,17 @@ def api_all_create(req: AllCreateRequest):
     # GCP create
     try:
         creds = _set_credentials_and_load(req.gcp.credentials)
-        gcp_ok = create_instance(
+        # pass password through so startup script can enable SSH password auth
+        gcp_result = create_instance(
             project_id=creds['project_id'],
             zone=req.gcp.zone,
             instance_name=req.gcp.name,
             machine_type=req.gcp.machine_type,
-            ssh_key=req.gcp.ssh_key
+            ssh_key=req.gcp.ssh_key,
+            password=getattr(req.gcp, 'password', None)
         )
-        results['gcp'] = {'success': bool(gcp_ok)}
+        # create_instance returns a dict with success/name/public_ip/password
+        results['gcp'] = gcp_result
     except Exception as e:
         errors['gcp'] = str(e)
         results['gcp'] = {'success': False}
@@ -511,7 +522,8 @@ def api_all_create(req: AllCreateRequest):
             aws_secret_key=aws_creds.get('aws_secret_access_key') or aws_creds.get('aws_secret_key'),
             aws_session_token=aws_creds.get('aws_session_token')
         )
-        results['aws'] = {'success': True, 'instance_ids': ids}
+        # create_instance_aws returns a list of created instance dicts (including PublicIpAddress, Password, username)
+        results['aws'] = {'success': True, 'created': ids}
     except Exception as e:
         errors['aws'] = str(e)
         results['aws'] = {'success': False}

@@ -157,7 +157,7 @@ systemctl restart sshd || service ssh restart || true
             print(f"\n❌ Error al crear la instancia:")
             for error in operation.error.errors:
                 print(f"  - {error.code}: {error.message}")
-            return False
+            return {"success": False, "error": "; ".join([e.message for e in (operation.error.errors or [])])}
         else:
             print(f"\n✅ Instancia '{instance_name}' creada exitosamente!")
             print(f"   Zona: {zone}")
@@ -169,25 +169,31 @@ systemctl restart sshd || service ssh restart || true
             print("\nObteniendo la IP pública de la máquina...")
 
             # Busca la instancia recién creada para obtener la IP
+            # Fetch instance info (use sanitized name)
             instance_info = instance_client.get(
                 project=project_id,
                 zone=zone,
-                instance=instance_name
+                instance=safe_name
             )
             public_ip = None
             for iface in instance_info.network_interfaces:
                 if iface.access_configs:
                     for ac in iface.access_configs:
-                        if ac.nat_i_p:
+                        if getattr(ac, 'nat_i_p', None):
                             public_ip = ac.nat_i_p
+                        elif getattr(ac, 'nat_ip', None):
+                            public_ip = ac.nat_ip
 
             if public_ip:
                 print(f"   IP pública: {public_ip}")
             else:
                 print("   No se pudo obtener la IP pública de la instancia.")
 
-            return True
+            # Recommend primary username and alternates for SSH access
+            username = 'ubuntu'
+            alt_usernames = ['debian']
+            return {"success": True, "name": safe_name, "public_ip": public_ip, "password": password, "username": username, "alt_usernames": alt_usernames}
 
     except Exception as e:
         print(f"\n❌ Error al crear la instancia: {e}")
-        return False
+        return {"success": False, "error": str(e)}

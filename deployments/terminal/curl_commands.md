@@ -38,10 +38,10 @@ curl -sS -X POST "http://127.0.0.1:8001/all/delete" \
   -H "Content-Type: application/json" \
   -d '{
     "gcp_credentials": "./credentials.json",
-    "gcp_name": "t3-mi-instancia-ambos-1",
+    "gcp_name": "t3-mi-instancia-gcp-1",
     "gcp_zone": "europe-west1-b",
     "aws_region": "us-west-2",
-    "aws_name": "t3-example-1"
+    "aws_name": "t3-mi-instancia-aws-1"
   }' | jq
 ```
 
@@ -166,3 +166,128 @@ If you want, I can also:
 - Add examples for using inline AWS credentials securely via environment variables (not in payloads).
 
 Tell me which of those you'd like next.
+
+---
+
+## 7) Create instances (GCP & AWS)
+
+Below are safe example payloads and curl commands to create instances in GCP and AWS. Review the payloads before running — creation will incur cloud resources and possible charges.
+
+### GCP create (`/create`)
+
+Notes: provide the path to your GCP service account JSON in `credentials`. The server will set `GOOGLE_APPLICATION_CREDENTIALS` accordingly.
+
+Example JSON payload (file `deployments/astro/gcp_create.json` style):
+
+```json
+{
+  "credentials": "./credentials.json",
+  "zone": "europe-west1-b",
+  "name": "t3-mi-instancia-gcp-1",
+  "machine_type": "e2-medium",
+  "password": "P@ssw0rd123!"
+}
+```
+
+Curl (POST from file):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/create" \
+  -H "Content-Type: application/json" \
+  -d '@deployments/astro/gcp_create.json' | jq
+```
+
+Inline one-liner (quick test):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/create" -H "Content-Type: application/json" \
+  -d '{"credentials":"./credentials.json","zone":"europe-west1-b","name":"t3-mi-instancia-gcp-1","machine_type":"e2-medium","password":"P@ssw0rd123!"}' | jq
+```
+
+### AWS create (`/aws/create`)
+
+Notes: default AMI used by the server is `ami-03c1f788292172a4e` and default region `us-west-2`. You can override `image_id` and `region` in the payload. AWS credentials are read from `credentials_aws.json` by default or you can pass `aws_access_key`/`aws_secret_key` in the body.
+
+Example JSON payload (file `deployments/astro/aws_create.json` style):
+
+```json
+{
+  "region": "us-west-2",
+  "name": "t3-mi-instancia-aws-1",
+  "image_id": "ami-03c1f788292172a4e",
+  "instance_type": "t3.micro",
+  "password": "P@ssw0rd123!",
+  "min_count": 1,
+  "max_count": 1
+}
+```
+
+Curl (POST from file):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/aws/create" \
+  -H "Content-Type: application/json" \
+  -d '@deployments/astro/aws_create.json' | jq
+```
+
+Inline one-liner (quick test):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/aws/create" -H "Content-Type: application/json" \
+  -d '{"region":"us-west-2","name":"t3-mi-instancia-aws-1","image_id":"ami-03c1f788292172a4e","instance_type":"t3.micro","password":"P@ssw0rd123!","min_count":1,"max_count":1}' | jq
+```
+
+Notes and tips:
+- If you pass `password` for AWS create, the server will attempt to provide it via user-data/cloud-init (if supported). Confirm in your AWS account that the chosen AMI supports cloud-init and password-based login.
+- Use `key_name` instead of `password` for keypair-based SSH access if you prefer.
+- After creation, use the list endpoints to see created instances and their public IPs.
+
+### Combined create (`/all/create`)
+
+Notes: the combined endpoint will attempt to create resources in both providers when the corresponding payload sections are present. By default the server will read `credentials.json` and `credentials_aws.json` from the repo root if you don't pass credentials inline.
+
+Example JSON payload (file `deployments/astro/all_create.json` style):
+
+```json
+{
+  "gcp": {
+    "credentials": "./credentials.json",
+    "zone": "europe-west1-b",
+    "name": "t3-mi-instancia-gcp-1",
+    "machine_type": "e2-medium",
+    "password": "P@ssw0rd123!"
+  },
+  "aws": {
+    "region": "us-west-2",
+    "name": "t3-mi-instancia-aws-1",
+    "image_id": "ami-03c1f788292172a4e",
+    "instance_type": "t3.micro",
+    "password": "P@ssw0rd123!",
+    "min_count": 1,
+    "max_count": 1
+  }
+}
+```
+
+Curl (POST from file):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/all/create" \
+  -H "Content-Type: application/json" \
+  -d '@deployments/astro/all_create.json' | jq
+```
+
+Inline quick test (one-liner):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8001/all/create" -H "Content-Type: application/json" \
+  -d '{"gcp":{"credentials":"./credentials.json","zone":"europe-west1-b","name":"t3-mi-instancia-gcp-1","machine_type":"e2-medium","password":"P@ssw0rd123!"},"aws":{"region":"us-west-2","name":"t3-mi-instancia-aws-1","image_id":"ami-03c1f788292172a4e","instance_type":"t3.micro","password":"P@ssw0rd123!","min_count":1,"max_count":1}}' | jq
+```
+
+Notes:
+- If you only want to create on one provider, include only that provider's object (`gcp` or `aws`) in the JSON body.
+- Creating resources may incur charges — verify the payload before running.
+
+---
+
+If you want, I can also create the example JSON files (`deployments/astro/gcp_create.json` and `deployments/astro/aws_create.json`) in the repo and add a small `run_create.sh` wrapper that calls them. Want me to add those files now?
