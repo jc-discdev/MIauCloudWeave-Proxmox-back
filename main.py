@@ -31,8 +31,6 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-# Tailscale Configuration
-TAILSCALE_AUTH_KEY = os.environ.get('TAILSCALE_AUTH_KEY')
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://innwater.eurecatprojects.com/lite-llm/")
 
