@@ -1,7 +1,0 @@
-{
-  "credentials": "./credentials.json",
-  "zone": "europe-west1-b",
-  "name": "t3-mi-instancia-gcp-1",
-  "machine_type": "e2-medium",
-  "password": "ChangeMeStrongP@ssw0rd"
-}

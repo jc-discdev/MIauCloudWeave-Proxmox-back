@@ -1,4 +1,0 @@
-GET /aws/list?region=us-west-2
-Accept: application/json
-
-// This GET endpoint returns only instances with Name tag starting with t3-

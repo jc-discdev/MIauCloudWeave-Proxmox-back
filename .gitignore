@@ -206,3 +206,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+MIGRATION.md
+old_cloud_providers/
+frontend/
+astro_int
+old_documentation/

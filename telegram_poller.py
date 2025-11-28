@@ -36,57 +36,113 @@ def send_message(chat_id, text):
         print(f"Error sending message: {e}")
 
 def handle_list_command(chat_id):
-    send_message(chat_id, "🔍 Buscando instancias activas...")
+    send_message(chat_id, "🔍 Buscando VMs y contenedores activos...")
     
     try:
-        # Get GCP instances
-        gcp_res = requests.get(f"{BACKEND_URL}/list")
-        gcp_data = gcp_res.json()
+        # Get Proxmox VMs and containers
+        proxmox_res = requests.get(f"{BACKEND_URL}/proxmox/list")
+        proxmox_data = proxmox_res.json()
         
-        # Get AWS instances
-        aws_res = requests.get(f"{BACKEND_URL}/aws/list")
-        aws_data = aws_res.json()
+        message = "📊 **Estado del Cluster Proxmox**\n\n"
         
-        message = "📊 **Estado del Cluster**\n\n"
-        
-        # GCP Section
-        message += "☁️ **Google Cloud (GCP)**\n"
-        if gcp_data.get('success') and gcp_data.get('instances'):
-            for inst in gcp_data['instances']:
-                name = inst.get('name', 'N/A')
-                status = inst.get('status', 'N/A')
-                ip = inst.get('external_ips', ['N/A'])[0] if inst.get('external_ips') else 'N/A'
-                cpu = inst.get('cpu', '?')
-                ram = inst.get('ram', '?')
-                
-                icon = "🟢" if status == "RUNNING" else "🔴"
-                message += f"{icon} *{name}*\n"
-                message += f"   IP: `{ip}`\n"
-                message += f"   Specs: {cpu} vCPU | {ram} GB RAM\n\n"
-        else:
-            message += "_No hay instancias activas_\n\n"
+        if proxmox_data.get('success') and proxmox_data.get('vms'):
+            # Separate by type
+            qemu_vms = [vm for vm in proxmox_data['vms'] if vm.get('type') == 'qemu']
+            lxc_containers = [vm for vm in proxmox_data['vms'] if vm.get('type') == 'lxc']
             
-        # AWS Section
-        message += "☁️ **Amazon AWS**\n"
-        if aws_data.get('success') and aws_data.get('instances'):
-            for inst in aws_data['instances']:
-                name = inst.get('Name', 'N/A')
-                status = inst.get('State', 'N/A')
-                ip = inst.get('PublicIpAddress', 'N/A')
-                cpu = inst.get('cpu', '?')
-                ram = inst.get('ram', '?')
-                
-                icon = "🟢" if status == "running" else "🔴"
-                message += f"{icon} *{name}*\n"
-                message += f"   IP: `{ip}`\n"
-                message += f"   Specs: {cpu} vCPU | {ram} GB RAM\n\n"
-        else:
-            message += "_No hay instancias activas_\n"
+            # QEMU VMs Section
+            if qemu_vms:
+                message += "🖥️ **Máquinas Virtuales (QEMU)**\n"
+                for vm in qemu_vms:
+                    name = vm.get('name', 'N/A')
+                    status = vm.get('status', 'N/A')
+                    ip = vm.get('ip', 'N/A')
+                    cpu = vm.get('cpu', '?')
+                    memory = vm.get('memory', '?')
+                    vmid = vm.get('vmid', '?')
+                    
+                    icon = "🟢" if status == "running" else "🔴"
+                    message += f"{icon} *{name}* (ID: {vmid})\n"
+                    message += f"   IP: `{ip}`\n"
+                    message += f"   Specs: {cpu} vCPU | {memory} MB RAM\n"
+                    message += f"   Estado: {status}\n\n"
             
+            # LXC Containers Section
+            if lxc_containers:
+                message += "📦 **Contenedores (LXC)**\n"
+                for ct in lxc_containers:
+                    name = ct.get('name', 'N/A')
+                    status = ct.get('status', 'N/A')
+                    ip = ct.get('ip', 'N/A')
+                    cpu = ct.get('cpu', '?')
+                    memory = ct.get('memory', '?')
+                    vmid = ct.get('vmid', '?')
+                    
+                    icon = "🟢" if status == "running" else "🔴"
+                    message += f"{icon} *{name}* (ID: {vmid})\n"
+                    message += f"   IP: `{ip}`\n"
+                    message += f"   Specs: {cpu} vCPU | {memory} MB RAM\n"
+                    message += f"   Estado: {status}\n\n"
+            
+            if not qemu_vms and not lxc_containers:
+                message += "_No hay VMs ni contenedores activos_\n"
+        else:
+            message += "_No hay VMs ni contenedores activos_\n"
+        
+        # Add summary
+        total_vms = len(proxmox_data.get('vms', []))
+        running_vms = len([vm for vm in proxmox_data.get('vms', []) if vm.get('status') == 'running'])
+        message += f"\n📈 **Resumen**: {running_vms}/{total_vms} activos"
+        
         send_message(chat_id, message)
         
     except Exception as e:
         send_message(chat_id, f"❌ Error al conectar con el backend: {str(e)}")
+
+def handle_credentials_command(chat_id):
+    """Get stored credentials for all instances"""
+    send_message(chat_id, "🔐 Obteniendo credenciales...")
+    
+    try:
+        creds_res = requests.get(f"{BACKEND_URL}/credentials")
+        creds_data = creds_res.json()
+        
+        if creds_data.get('success') and creds_data.get('credentials'):
+            message = "🔑 **Credenciales Almacenadas**\n\n"
+            
+            for name, creds in creds_data['credentials'].items():
+                message += f"*{name}*\n"
+                message += f"   Usuario: `{creds.get('username', 'N/A')}`\n"
+                message += f"   Password: `{creds.get('password', 'N/A')}`\n"
+                message += f"   IP: `{creds.get('ip', 'N/A')}`\n"
+                message += f"   Tipo: {creds.get('type', 'N/A')}\n"
+                message += f"   VMID: {creds.get('vmid', 'N/A')}\n\n"
+            
+            send_message(chat_id, message)
+        else:
+            send_message(chat_id, "ℹ️ No hay credenciales almacenadas")
+    
+    except Exception as e:
+        send_message(chat_id, f"❌ Error al obtener credenciales: {str(e)}")
+
+def handle_help_command(chat_id):
+    """Show available commands"""
+    message = """🤖 **MIauCloudWeave - Proxmox Manager Bot**
+
+**Comandos disponibles:**
+
+/start - Iniciar el bot
+/list - Ver todas las VMs y contenedores
+/credentials - Ver credenciales almacenadas
+/help - Mostrar esta ayuda
+
+**Características:**
+• Gestión de VMs QEMU
+• Gestión de contenedores LXC
+• Clusters Docker Swarm
+• Notificaciones automáticas
+"""
+    send_message(chat_id, message)
 
 def main():
     offset = None
@@ -103,11 +159,15 @@ def main():
                     print(f"📩 Received: {text} from {chat_id}")
                     
                     if text == '/start':
-                        send_message(chat_id, "👋 Hola! Soy tu Cloud Manager Bot.\n\nComandos:\n/list - Ver instancias activas")
+                        send_message(chat_id, "👋 ¡Hola! Soy tu Proxmox Cloud Manager Bot.\n\nUsa /help para ver los comandos disponibles.")
                     elif text == '/list':
                         handle_list_command(chat_id)
                     elif text == '/credentials':
-                        send_message(chat_id, "🔐 Para ver credenciales, usa el dashboard web o espera a recibir notificaciones automáticas.")
+                        handle_credentials_command(chat_id)
+                    elif text == '/help':
+                        handle_help_command(chat_id)
+                    else:
+                        send_message(chat_id, f"❓ Comando no reconocido: {text}\n\nUsa /help para ver los comandos disponibles.")
         
         time.sleep(1)
 

@@ -1,9 +1,0 @@
-POST /aws/find
-Content-Type: application/json
-
-{
-  "region": "us-west-2",
-  "name": "example-1"
-}
-
-// Returns instances whose Name tag starts with t3-example-1

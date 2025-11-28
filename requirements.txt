@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
-google-cloud-compute
 pydantic
 openai
-boto3
 python-dotenv
 paramiko
+proxmoxer
+requests

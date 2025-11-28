@@ -1,7 +1,0 @@
-{
-  "credentials": "./credentials.json",
-  "zone": "europe-west1-b",
-  "region": "europe-west1",
-  "cpus": 2,
-  "ram": 4
-}

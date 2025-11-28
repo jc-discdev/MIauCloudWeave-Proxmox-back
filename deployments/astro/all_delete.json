@@ -1,9 +1,0 @@
-{
-  "gcp_credentials": "./credentials.json",
-  "gcp_name": "t3-mi-instancia-gcp-1",
-  "gcp_zone": "europe-west1-b",
-  "aws_region": "us-west-2",
-  "aws_instance_id": null,
-  "aws_name": "t3-mi-instancia-aws-1",
-  "use_credentials_file": true
-}

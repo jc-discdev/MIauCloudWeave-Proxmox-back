@@ -1,9 +1,0 @@
-POST /aws/delete
-Content-Type: application/json
-
-{
-  "region": "us-west-2",
-  "name": "t3-example-1"
-}
-
-// Deletes only if the instance Name tag starts with t3-

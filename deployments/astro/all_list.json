@@ -1,6 +1,0 @@
-{
-  "gcp_credentials": "./credentials.json",
-  "gcp_zone": "europe-west1-b",
-  "aws_region": "us-west-2",
-  "state": "running"
-}
